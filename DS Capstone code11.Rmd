@@ -1,0 +1,230 @@
+---
+title: "Data Science CapStone Project_1"
+author: "Jitender Kumar"
+date: "June 11, 2016"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, tidy= TRUE)
+setwd("D:/Study/Coursera DS/Data Science Project/Assignment")
+```
+
+## Executive Summary and Introduction
+
+The goal of this project is just to display that we gotten used to working with the data and on track to create  prediction algorithm. With this we will learn and familiarze oursleves with NLP and text mining. 
+
+Data is obtanied from https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip
+
+We have accomplished the following tasks 
+
+- Obtaining the data and gaining basic info about the data
+- Sample creation using binom function
+- Pre processing, filtering and tidying data
+- Tokenization and ngrams creation
+- Exploratory Analysis of words frequency
+- Visualization of ngrams and word clouds
+- Feedback about analysis
+
+
+As a part of Capstone project, we have to further develop a word prediction app.
+
+
+### Loading and Reading data
+
+```{r message = FALSE, warning = FALSE, echo = FALSE }
+
+library(tm)
+library(ggplot2)
+library(knitr)
+library(cluster) 
+library(wordcloud)
+library(stringi)
+library(stringr)
+library(dplyr)
+library(rJava)
+library(RColorBrewer)
+library(R.utils)
+library(scales)
+library(RWeka)
+library(quanteda)
+```
+
+```{r read_data, cache=TRUE, message=FALSE, warning=FALSE}
+setwd("D:/Study/Coursera DS/Data Science Project/Assignment")
+
+read_blogs<-readLines("Data/final/en_US/en_US.blogs.txt")
+read_news<-readLines("Data/final/en_US/en_US.news.txt")
+read_twitter<-readLines("Data/final/en_US/en_US.twitter.txt")
+```
+
+
+### Preliminary Analysis
+
+```{r basic_info, cache=TRUE}
+setwd("D:/Study/Coursera DS/Data Science Project/Assignment")
+
+file_names<-c("en_US Blogs","en_US News","en_US Twitter")
+
+file_size<- round(c(file.info("Data/final/en_US/en_US.blogs.txt")$size/1024^2, file.info("Data/final/en_US/en_US.news.txt")$size/1024^2,file.info("Data/final/en_US/en_US.twitter.txt")$size/1024^2),2)
+
+file_length<-c(length(read_blogs),length(read_news),length(read_twitter))
+
+file_words<-c(length(unlist(strsplit(read_blogs, " "))),length(unlist(strsplit(read_news, " "))),length(unlist(strsplit(read_twitter, " "))))
+
+total_char<-c(sum(nchar(read_blogs)), sum(nchar(read_news)),sum(nchar(read_twitter)))
+
+info_table<-as.data.frame(cbind(file_names,file_size,file_length,file_words,total_char))
+
+names(info_table)<- c("File Names", "Size (MB)", "Length","Num words", "Total char")
+kable(info_table)
+```
+
+### Binom Sampling
+
+Sampling with binom function. Given the huge size of files and memory limitations we are selecting only 2% of original data.
+
+Non ASCII characters have also been reomoved from sample.
+
+```{r sample_creation, cache=TRUE }
+
+data_blogs<- read_blogs[rbinom(length(read_blogs), size=1, prob= 0.02)==1]
+data_news<- read_blogs[rbinom(length(read_news), size=1, prob= 0.02)==1]
+data_twitter<- read_blogs[rbinom(length(read_twitter), size=1, prob= 0.02)==1]
+
+## Removing non ASCII characters
+data_blogs<- iconv(data_blogs, 'UTF-8', 'ASCII', "byte")
+data_news<- iconv(data_news, 'UTF-8', 'ASCII', "byte")
+data_twitter<- iconv(data_twitter, 'UTF-8', 'ASCII', "byte")
+
+# Removing large data sets to preserve memory
+rm(read_blogs, read_news, read_twitter)
+```
+
+### Pre processing data
+
+I have identified few non meaniful words which will be removed.
+It seems they they are case of mis typing. 
+```{r preprocess, cache=TRUE}
+data_all<- c(data_blogs, data_news, data_twitter)
+
+## Tidying up data
+data_all <- gsub(" #\\S*","", data_all) 
+data_all <- gsub("(http)(s?)(://)(\\S*)", "", data_all) 
+
+rm_words<-c("will","9b","9c","a3","a9","b9","bb","c2","c3","d7","ef","e1","e2")
+
+## Profane words list from www.bannedwordlist.com
+setwd("D:/Study/Coursera DS/Data Science Project/Assignment")
+profane_words<-read.csv("swearWords.txt")
+```
+
+We have done the following data transformation
+
+- non-ASCII characters removal
+- whitespace and http cleaning
+- profane words removal
+
+Following transformation will be done as part of dfm function
+
+- Remove Uppercase
+- Remove Numbers
+- Remove Punctuation
+- Remove common english words
+- Remove # and @, twitter characters  
+
+
+### Ngrams creation
+
+
+
+```{r ngrams_creation, cache=TRUE,message = FALSE, results="hide"}
+
+## Uni gram creation
+dfm_unigram<-dfm(data_all,ngrams=1, removeTwitter= TRUE, stem=TRUE, ignoredFeatures = c(rm_words,stopwords("english"), ignoredFeatures =as.character(profane_words)))
+
+## Bi gram creation
+dfm_bigram<-dfm(data_all,ngrams=2, removeTwitter= TRUE, concatenator = " ", ignoredFeatures = c(rm_words, stopwords("english"), ignoredFeatures =as.character(profane_words)))
+
+## Tri gram creation
+dfm_trigram<-dfm(data_all,ngrams=3, removeTwitter= TRUE, concatenator = " ", ignoredFeatures = c(rm_words, stopwords("english"), ignoredFeatures =as.character(profane_words)))
+
+### Stem = TRUE is giving issues in whitespace, even after cleaning the data. Another option is to tokenize and then use dfm.
+
+```
+
+Quanteda's dfm() and tm_map() function comparision
+
+- dfm is much faster
+- we have to use DocumentTermMatrix for cleaning and frequency which can be done very easily with dfm.
+- n-grams and token creation is also better
+
+
+### Word frequency 
+
+
+```{r freq_calculation, cache= TRUE}
+head(dfm_unigram)
+unigram_freq <- sort(colSums(dfm_unigram), decreasing = T)
+bigram_freq <- sort(colSums(dfm_bigram), decreasing = T)
+trigram_freq <- sort(colSums(dfm_trigram), decreasing = T)
+```
+
+
+### Word cloud and histograms
+
+```{r plotting, cache=TRUE}
+# word cloud of unigrams
+plot(dfm_unigram, max.words = 100, colors = brewer.pal(6, "Dark2"))
+
+# word cloud of bigrams
+plot(dfm_bigram, max.words = 100, colors = brewer.pal(6, "Dark2"))
+
+## Unigram histogram
+unigram_df <- data.frame(Unigrams=names(unigram_freq), Frequency = unigram_freq)
+
+plot1 <- ggplot(within(unigram_df[1:25, ], Unigrams <- factor(Unigrams, levels=Unigrams)), aes(x=reorder(Unigrams,Frequency), y=Frequency))
+plot1 <- plot1 + geom_bar(stat="identity", fill="grey") + ggtitle("Top 25 Unigrams plot") + xlab("Unigrams") + ylab("Frequency")
+plot1 <- plot1 + theme(axis.text.x=element_text(angle=90, hjust=1)) + coord_flip() 
+plot1
+
+## Bigram histogram
+bigram_df <- data.frame(Bigrams=names(bigram_freq), Frequency = bigram_freq)
+
+plot2 <- ggplot(within(bigram_df[1:25, ], Bigrams <- factor(Bigrams)), aes(x=reorder(Bigrams,Frequency), y=Frequency))
+plot2 <- plot2 + geom_bar(stat="identity", fill="grey") + ggtitle("Top 25 Bigrams plot") + xlab("Bigrams") + ylab("Frequency")
+plot2 <- plot2 + theme(axis.text.x=element_text(angle=90, hjust=1)) + coord_flip() 
+plot2
+
+## Trigram histogram
+trigram_df <- data.frame(Trigrams=names(trigram_freq), Frequency = trigram_freq)
+
+plot3 <- ggplot(within(trigram_df [1:25, ], Trigrams <- factor(Trigrams, levels=Trigrams)), aes(x=reorder(Trigrams,Frequency), y=Frequency))
+plot3 <- plot3 + geom_bar(stat="identity", fill="grey") + ggtitle("Top 25 Trigrams plot") + xlab("Trigrams") + ylab("Frequency")
+plot3 <- plot3 + theme(axis.text.x=element_text(angle=90, hjust=1)) + coord_flip()
+plot3
+
+```
+
+From the bi gram, I can see that few most used words are new, last, can and one.
+
+## Conclusion and Next steps
+
+
+We have demonstrated through the above applicaiton ngrams creation from the sample data.
+
+Going ahead we need to develop an app using the above analysis. 
+
+We need to provide probablities of our prediction.Key example is multiple high frequecy bigrams have few common first words. 
+
+We also need to explore the following
+
+- explore dfm vs tm functions for text mining
+- dealing with mis spelled, missing data
+- how to efficiently store the n grams
+- ways of smoothing the word prediction probablity
+- evaluation and improvment of models 
+
+I may have missed many things so let me know your feedback.
+
